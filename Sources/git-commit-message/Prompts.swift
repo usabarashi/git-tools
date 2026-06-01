@@ -53,19 +53,21 @@ enum Prompts {
     to one sentence and label it by its theme. Write in English.
     """
 
-    /// REDUCE: author only the prose; type and scope are decided deterministically.
+    /// REDUCE: author only the prose; type and scope are deterministic, and the
+    /// bullets are pre-grouped, so emit exactly one bullet per group.
     static let reduce = """
-    You write the subject and body of a single git commit message from a list of \
-    per-file change summaries. Use ONLY these summaries; never infer anything not \
-    stated in them.
+    You write the subject and bullets of a single git commit message from change \
+    summaries that are already grouped for you. Use ONLY these summaries; never infer \
+    anything not stated in them.
     - subject: a natural-English imperative phrase WITH SPACES (e.g. "add input \
     validation across modules"), lower-case first word, no trailing period, at most 50 \
     characters, capturing the dominant change. Never an identifier, slug, \
     underscore_case, or a file name.
-    - body: GROUP files that share the same kind of change into a SINGLE bullet. Produce \
-    at most 6 "- " bullets total. NEVER write one bullet per file and NEVER list file \
-    paths. Each bullet is a short natural-English clause grounded in the summaries. \
-    Leave the body empty only when there is a single self-evident change.
+    - bullets: produce EXACTLY ONE bullet per group shown, copying the group name \
+    verbatim into the `group` field. Each bullet is a short natural-English clause \
+    summarizing that group's change; never list file paths and never write more than one \
+    bullet per group. If there is only one group, its bullet should explain WHY the \
+    change was made.
     Write everything in English.
     """
 }
