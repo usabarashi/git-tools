@@ -158,10 +158,14 @@ enum Generator {
         // dominant group is not starved and tiny groups are not over-allocated.
         let weights = ordered.map { max(joined($0.summaries).count, 1) }
         let totalWeight = max(weights.reduce(0, +), 1)
+        // Allocate the per-group floor first, then split the remainder
+        // proportionally, so the sum of targets never exceeds the budget. With
+        // at most 7 categories the floors always leave room.
+        let remaining = max(0, batchChars - ordered.count * minGroupChars)
 
         var result: [CategoryGroup] = []
         for (index, group) in ordered.enumerated() {
-            let target = max(minGroupChars, batchChars * weights[index] / totalWeight)
+            let target = minGroupChars + remaining * weights[index] / totalWeight
             var current = group.summaries
             while joined(current).count > target {
                 progress("condensing \(group.category.groupName) (\(current.count) summaries)…")
@@ -228,8 +232,20 @@ enum Generator {
             body: bullets.joined(separator: "\n"))
     }
 
+    /// Canonicalizes a model-produced group name to a FileCategory.groupName,
+    /// tolerant of prefixes ("## group: source"), singular/plural variants, and
+    /// stray newlines, since small models rarely copy a label exactly.
     private static func normalizeGroup(_ name: String) -> String {
-        name.lowercased().trimmingCharacters(in: .whitespaces)
+        let lower = name.lowercased()
+        let table: [(needle: String, canonical: String)] = [
+            ("test", "tests"), ("dependenc", "dependencies"), ("doc", "docs"),
+            ("config", "config"), ("source", "source"), ("binar", "binary"),
+            ("generated", "generated"),
+        ]
+        for entry in table where lower.contains(entry.needle) {
+            return entry.canonical
+        }
+        return lower.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Helpers
