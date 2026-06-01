@@ -14,8 +14,9 @@ USAGE:
         git commit-message | git commit -F -
 
 OPTIONS:
-    --dry-run    Print the prompt that would be sent to the model, then exit.
-                 Works even when Apple Intelligence is not enabled.
+    --dry-run    Print the dry-run execution plan (fast vs map-reduce path and
+                 parsed files), then exit. Works even when Apple Intelligence is
+                 not enabled.
     -h, --help   Show this help.
 """
 
