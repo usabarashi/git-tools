@@ -14,67 +14,15 @@ USAGE:
         git commit-message | git commit -F -
 
 OPTIONS:
-    --dry-run    Print the prompt that would be sent to the model, then exit.
-                 Works even when Apple Intelligence is not enabled.
+    --dry-run    Print the dry-run execution plan (fast vs map-reduce path and
+                 parsed files), then exit. Works even when Apple Intelligence is
+                 not enabled.
     -h, --help   Show this help.
-"""
-
-let instructions = """
-You write a single git commit message for the given staged changes, following \
-the Conventional Commits specification. The output is consumed programmatically, \
-so be precise.
-
-Rules:
-- subject: imperative mood, lower-case first word, no trailing period, at most 50 \
-characters. Phrase it as a command ("add", "fix", "guard", "rename"), never past \
-tense ("added", "fixed").
-- type: infer from the NATURE of the change, not from words in the diff:
-  - feat: introduces a capability or behavior that did not exist before.
-  - fix: corrects wrong behavior or a bug, INCLUDING adding a guard or validation \
-to existing code.
-  - refactor: restructures code without changing behavior (rename, extract, move).
-  - docs: documentation or comments only. test: tests only.
-  - perf: performance. style: formatting only. \
-build/ci/chore: tooling, dependencies, configuration.
-- scope: a short noun for the affected area, such as a module or file name without \
-its extension. Leave empty when it is not obvious.
-- body: explain WHY the change is needed, not WHAT changed line by line. Wrap at 72 \
-columns. Leave empty for trivial or self-evident changes.
-- Write everything in English.
-
-Examples (change -> fields):
-- Added an early `if not values: return 0` to an existing average() function ->
-  type: fix | scope: calc | subject: guard against empty input in average
-  body: average() divided by zero on an empty list, crashing callers; return 0 instead.
-- Added a brand-new `--json` flag that prints results as JSON ->
-  type: feat | scope: cli | subject: add --json output flag | body: (empty)
-- Renamed doStuff() to processBatch() with no behavior change ->
-  type: refactor | scope: (empty) | subject: rename doStuff to processBatch | body: (empty)
-- Fixed typos in the README install section ->
-  type: docs | scope: readme | subject: fix typos in install steps | body: (empty)
 """
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
     exit(1)
-}
-
-func buildPrompt(context: String) -> String {
-    """
-    Generate a commit message for the following staged changes.
-
-    \(context)
-    """
-}
-
-func generate(prompt: String) async throws -> CommitMessage {
-    let session = LanguageModelSession(instructions: instructions)
-    let response = try await session.respond(
-        to: prompt,
-        generating: CommitMessage.self,
-        options: GenerationOptions(temperature: 0.3)
-    )
-    return response.content
 }
 
 // MARK: - Argument parsing
@@ -106,13 +54,10 @@ if patch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
     fail("no staged changes. Stage files with `git add` first")
 }
 
-let context = DiffContext.build(stat: stat, patch: patch)
-let prompt = buildPrompt(context: context)
-
-// --dry-run exits before touching the model so the prompt can be inspected
+// --dry-run exits before touching the model so the plan can be inspected
 // even when Apple Intelligence is not yet enabled.
 if isDryRun {
-    print(prompt)
+    print(Generator.dryRunDescription(stat: stat, patch: patch))
     exit(0)
 }
 
@@ -125,16 +70,7 @@ if let reason = ModelAvailability.unavailableReason() {
 // MARK: - Generate
 
 do {
-    let message: CommitMessage
-    do {
-        message = try await generate(prompt: prompt)
-    } catch let error as LanguageModelSession.GenerationError {
-        // Only the context window overflow is recoverable by shrinking the
-        // input; any other generation error should surface as-is.
-        guard case .exceededContextWindowSize = error else { throw error }
-        let minimal = buildPrompt(context: DiffContext.statOnly(stat: stat))
-        message = try await generate(prompt: minimal)
-    }
+    let message = try await Generator.generate(stat: stat, patch: patch)
     print(message.rendered())
 } catch {
     fail("generation failed: \(error)")
