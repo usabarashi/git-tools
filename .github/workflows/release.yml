@@ -1,0 +1,97 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege by default. Only the release job, which never runs on PRs,
+# is granted contents: write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Must be macos-26: the binary links FoundationModels.framework, which only
+    # exists on macOS 26 at runtime. `macos-latest` currently resolves to an
+    # older OS where Xcode 26's SDK lets the build succeed but the binary then
+    # fails to load FoundationModels at runtime ("built for macOS 26.0 which is
+    # newer than running OS"). Revisit only once macos-latest points at macOS 26.
+    runs-on: macos-26
+
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+          swift --version
+
+      # Version is the build timestamp (UTC); no manual tagging.
+      - name: Compute version
+        id: version
+        run: echo "value=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: swift build -c release
+
+      # Apple Intelligence is unavailable on CI runners, so we cannot exercise
+      # actual generation. We verify the binary and the AI-independent paths.
+      - name: Smoke test (AI-independent paths)
+        run: |
+          BIN=.build/release/git-commit-message
+          "$BIN" --help
+
+          # --dry-run reads the staged diff and builds the prompt without the model.
+          git config user.email ci@example.com
+          git config user.name ci
+          printf 'ci probe\n' > _ci_probe.txt
+          git add _ci_probe.txt
+          "$BIN" --dry-run > /dev/null
+          git restore --staged _ci_probe.txt
+          rm -f _ci_probe.txt
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp .build/release/git-commit-message dist/git-commit-message
+          # arm64 only: Apple Intelligence requires Apple silicon.
+          (cd dist && shasum -a 256 git-commit-message > git-commit-message.sha256)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-commit-message-${{ steps.version.outputs.value }}
+          path: dist/*
+
+  # Publishing the release is the only step that needs write access, and it
+  # never runs on pull requests. Isolating it keeps build/smoke (which runs on
+  # PRs) read-only.
+  release:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: git-commit-message-${{ needs.build.outputs.version }}
+          path: dist
+
+      # Create a release named by the build timestamp. The action creates the
+      # tag automatically at this commit, so no manual tag operation is needed.
+      - name: Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: build-${{ needs.build.outputs.version }}
+          name: ${{ needs.build.outputs.version }}
+          files: dist/*
