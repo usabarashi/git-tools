@@ -36,18 +36,18 @@ enum Git {
         nonisolated(unsafe) var errData = Data()
         let errSemaphore = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            errData = (try? errPipe.fileHandleForReading.readToEnd()) ?? Data()
             errSemaphore.signal()
         }
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let outData = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
         errSemaphore.wait()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            let message = String(data: errData, encoding: .utf8) ?? ""
+            let message = String(decoding: errData, as: UTF8.self)
             throw GitError.commandFailed(args: arguments, message: message)
         }
-        return String(data: outData, encoding: .utf8) ?? ""
+        return String(decoding: outData, as: UTF8.self)
     }
 
     static func stagedStat() throws -> String {
