@@ -109,7 +109,7 @@ extension CommitMessage {
     static func normalizeScope(_ scope: String) -> String {
         // A scope is a single token; collapse to the first line so a stray
         // newline cannot break the header.
-        let firstLine = scope.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let firstLine = String(scope.prefix { !$0.isNewline })
         let trimmed = firstLine.trimmingCharacters(in: .whitespaces)
         guard let dot = trimmed.lastIndex(of: ".") else { return trimmed }
         let ext = trimmed[trimmed.index(after: dot)...]
