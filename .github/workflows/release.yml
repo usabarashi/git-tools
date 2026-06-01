@@ -1,0 +1,77 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # NOTE: this build requires macOS 26 + Xcode 26 (the FoundationModels SDK
+    # targets macosx26.0 and @Generable needs the FoundationModelsMacros plugin
+    # from Xcode 26). `macos-latest` only works once GitHub points it at macOS 26;
+    # while it still resolves to an older image the build will fail. Pin to
+    # `macos-26` if that happens.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+          swift --version
+
+      # Version is the build timestamp (UTC); no manual tagging.
+      - name: Compute version
+        id: version
+        run: echo "value=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: swift build -c release
+
+      # Apple Intelligence is unavailable on CI runners, so we cannot exercise
+      # actual generation. We verify the binary and the AI-independent paths.
+      - name: Smoke test (AI-independent paths)
+        run: |
+          BIN=.build/release/git-commit-message
+          "$BIN" --help
+
+          # --dry-run reads the staged diff and builds the prompt without the model.
+          git config user.email ci@example.com
+          git config user.name ci
+          printf 'ci probe\n' > _ci_probe.txt
+          git add _ci_probe.txt
+          "$BIN" --dry-run > /dev/null
+          git restore --staged _ci_probe.txt
+          rm -f _ci_probe.txt
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp .build/release/git-commit-message dist/git-commit-message
+          # arm64 only: Apple Intelligence requires Apple silicon.
+          (cd dist && shasum -a 256 git-commit-message > git-commit-message.sha256)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-commit-message-${{ steps.version.outputs.value }}
+          path: dist/*
+
+      # Create a release named by the build timestamp. The action creates the
+      # tag automatically at this commit, so no manual tag operation is needed.
+      # Releases are produced on pushes to main and manual runs, not on PRs.
+      - name: Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: build-${{ steps.version.outputs.value }}
+          name: ${{ steps.version.outputs.value }}
+          files: dist/*
