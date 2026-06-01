@@ -1,3 +1,4 @@
+import Darwin  // isatty
 import Foundation
 import GitCore
 
@@ -13,7 +14,7 @@ USAGE:
 
       - merged          tip is an ancestor of the default branch
       - patch-equivalent the branch diff already exists (squash-merged)
-      - no-diff         the branch has no net change vs the default branch
+      - no-diff         the branch has no net change since its merge-base
 
     Protected branches are never deleted: the current branch, the default
     branch, and main / master / develop / release/*.

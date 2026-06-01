@@ -24,7 +24,7 @@ public enum CleanReason: Sendable {
         switch self {
         case .merged: return "merged into \(base)"
         case .patchEquivalent: return "patch already on \(base) (squash-merged)"
-        case .sameTree: return "no changes vs \(base)"
+        case .sameTree: return "no net change since the merge-base with \(base)"
         }
     }
 }
@@ -48,26 +48,31 @@ public enum BranchCleaner {
         for branch in Git.localBranches() {
             if protectedBranches.contains(branch) { continue }
             if protectedPrefixes.contains(where: branch.hasPrefix) { continue }
-            guard let reason = classify(branch: branch, base: base) else { continue }
-            result.append(CleanCandidate(branch: branch, tip: Git.tipSHA(branch), reason: reason))
+            // Resolve through the fully-qualified ref everywhere: a bare short
+            // name fed to revision-parsing plumbing is ambiguous (a tag of the
+            // same name wins) and a name starting with `-` could be read as an
+            // option.
+            let branchRef = "refs/heads/\(branch)"
+            guard let reason = classify(branchRef: branchRef, base: base) else { continue }
+            result.append(CleanCandidate(branch: branch, tip: Git.tipSHA(branchRef), reason: reason))
         }
         return result
     }
 
-    private static func classify(branch: String, base: String) -> CleanReason? {
-        if Git.isAncestor(branch, of: base) {
+    private static func classify(branchRef: String, base: String) -> CleanReason? {
+        if Git.isAncestor(branchRef, of: base) {
             return .merged
         }
-        guard let mergeBase = Git.mergeBase(branch, base) else {
+        guard let mergeBase = Git.mergeBase(branchRef, base) else {
             return nil  // unrelated history; never a candidate
         }
-        if Git.hasNoDiff(from: mergeBase, to: branch) {
+        if Git.hasNoDiff(from: mergeBase, to: branchRef) {
             return .sameTree
         }
         // Squash detection: a synthetic commit carrying the branch's whole diff
         // from the merge-base; if its patch already exists upstream, the branch
         // was squash-merged.
-        guard let tree = try? Git.run(["rev-parse", "\(branch)^{tree}"])
+        guard let tree = try? Git.run(["rev-parse", "\(branchRef)^{tree}"])
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !tree.isEmpty,
             let synthetic = try? Git.commitTree(tree: tree, parent: mergeBase)

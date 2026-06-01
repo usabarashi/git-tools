@@ -99,7 +99,9 @@ extension Git {
     /// throwing so callers can report a per-branch failure (e.g. the branch is
     /// checked out in another worktree) and continue.
     public static func forceDeleteBranch(_ branch: String) -> Result {
-        (try? capture(["branch", "-D", branch]))
+        // `--` ends option parsing so a branch name beginning with `-` is never
+        // mistaken for a flag.
+        (try? capture(["branch", "-D", "--", branch]))
             ?? Result(status: 1, stdout: "", stderr: "could not run git branch -D \(branch)")
     }
 }
