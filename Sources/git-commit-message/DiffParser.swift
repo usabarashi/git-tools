@@ -225,8 +225,12 @@ enum DiffParser {
     /// Maps a summary label back to its file's category for grouping. Labels are
     /// either an exact path or "path <hunk header>"; `.other` folds into source.
     static func category(forLabel label: String, files: [FileChange]) -> FileCategory {
-        let file = files.first { label == $0.path || label.hasPrefix($0.path + " ") }
-        let category = file?.category ?? .source
+        // Prefer the longest matching path so shared prefixes don't collide.
+        // Hunk labels are "path @@…", so match on " @@" rather than a bare space.
+        let match = files
+            .filter { label == $0.path || label.hasPrefix($0.path + " @@") }
+            .max { $0.path.count < $1.path.count }
+        let category = match?.category ?? .source
         return category == .other ? .source : category
     }
 
