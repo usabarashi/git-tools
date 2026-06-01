@@ -49,9 +49,11 @@ jobs:
           git config user.name ci
           printf 'ci probe\n' > _ci_probe.txt
           git add _ci_probe.txt
-          for bin in git-commit-message git-branch-name; do
+          for bin in git-commit-message git-branch-name git-branch-clean; do
             ".build/release/$bin" --help
-            # --dry-run reads the staged diff and builds the plan without the model.
+          done
+          # --dry-run reads the staged diff and builds the plan without the model.
+          for bin in git-commit-message git-branch-name; do
             ".build/release/$bin" --dry-run > /dev/null
           done
           git restore --staged _ci_probe.txt
@@ -61,7 +63,7 @@ jobs:
         run: |
           mkdir -p dist
           # arm64 only: Apple Intelligence requires Apple silicon.
-          for bin in git-commit-message git-branch-name; do
+          for bin in git-commit-message git-branch-name git-branch-clean; do
             cp ".build/release/$bin" "dist/$bin"
             (cd dist && shasum -a 256 "$bin" > "$bin.sha256")
           done

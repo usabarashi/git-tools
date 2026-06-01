@@ -66,21 +66,24 @@ switch did not take effect — re-run step 2.
 swift build -c release
 ```
 
-The products are two small native binaries at `.build/release/git-commit-message`
-and `.build/release/git-branch-name`. The model is not bundled — it is the system
-on-device model, linked dynamically. The macro is fully expanded at compile time,
-so the binaries have no build-time dependency baked in: they run on any compliant
-runtime machine without Xcode.
+The products are three small native binaries at `.build/release/git-commit-message`,
+`.build/release/git-branch-name`, and `.build/release/git-branch-clean`. The model
+is not bundled — it is the system on-device model, linked dynamically. The macro
+is fully expanded at compile time, so the binaries have no build-time dependency
+baked in: they run on any compliant runtime machine without Xcode. `git-branch-clean`
+links no model at all and runs anywhere git does.
 
 ### 4. Install on PATH
 
 git discovers any `git-<name>` executable on `PATH` as a subcommand, so the
-binaries are callable as `git commit-message` and `git branch-name`.
+binaries are callable as `git commit-message`, `git branch-name`, and
+`git branch-clean`.
 
 ```sh
 mkdir -p ~/.local/bin
 ln -sf "$(pwd)/.build/release/git-commit-message" ~/.local/bin/git-commit-message
 ln -sf "$(pwd)/.build/release/git-branch-name" ~/.local/bin/git-branch-name
+ln -sf "$(pwd)/.build/release/git-branch-clean" ~/.local/bin/git-branch-clean
 
 # Ensure ~/.local/bin is on PATH (add to ~/.zshrc if missing)
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc ;; esac
