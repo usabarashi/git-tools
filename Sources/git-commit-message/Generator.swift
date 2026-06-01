@@ -79,16 +79,20 @@ enum Generator {
             // A single file over budget: summarize hunk by hunk so each call
             // still fits. A single hunk over budget is summarized honestly as
             // partial rather than truncated-and-passed-off-as-complete.
+            var addedPartial = false
             for hunk in file.hunks {
                 let text = file.header.isEmpty ? hunk : "\(file.header)\n\(hunk)"
                 if text.count <= batchChars {
                     pieces.append(("\(file.path) \(hunkLabel(hunk))", text))
-                } else {
+                } else if !addedPartial {
+                    // Emit at most one partial summary per file, however many
+                    // of its hunks are individually over budget.
                     deterministic.append(LabeledSummary(
                         label: file.path,
                         summary: "large change in \(file.path) (+\(file.additions)/-\(file.deletions)); shown only partially",
                         suggestedType: "chore",
                         partial: true))
+                    addedPartial = true
                 }
             }
         }
@@ -98,11 +102,11 @@ enum Generator {
         for (index, batch) in batches.enumerated() {
             progress("summarizing batch \(index + 1)/\(batches.count)…")
             let summaries = try await mapCall(batch)
-            // Trust input order; the model returns one summary per piece.
-            for (offset, piece) in batch.enumerated() {
-                if offset < summaries.count {
-                    let s = summaries[offset]
-                    results.append(LabeledSummary(label: piece.label, summary: s.summary, suggestedType: s.suggestedType))
+            // Re-associate by label; the model may reorder, duplicate, or omit
+            // items even when asked to preserve order.
+            for piece in batch {
+                if let match = summaries.first(where: { $0.label == piece.label }) {
+                    results.append(LabeledSummary(label: piece.label, summary: match.summary, suggestedType: match.suggestedType))
                 } else {
                     results.append(LabeledSummary(label: piece.label, summary: "changed", suggestedType: "chore"))
                 }
@@ -160,8 +164,23 @@ enum Generator {
         let type = DiffParser.aggregateType(files: files, perFileTypes: summaries.map(\.suggestedType))
         let scope = DiffParser.deriveScope(files)
 
-        var prompt = "Write a commit message from these per-file change summaries. Use ONLY these summaries; never infer anything not stated.\n\n"
-        for s in summaries { prompt += "- [\(s.label)] \(s.summary)\n" }
+        // Cap the summary list to the budget so the reduce call honors the
+        // no-call-exceeds-the-window invariant even when condense could not fully
+        // shrink the set; any drop is stated honestly rather than silently.
+        var lines = ""
+        var omitted = 0
+        for s in summaries {
+            let line = "- [\(s.label)] \(s.summary)\n"
+            if lines.count + line.count > batchChars {
+                omitted += 1
+            } else {
+                lines += line
+            }
+        }
+        var prompt = "Write a commit message from these per-file change summaries. Use ONLY these summaries; never infer anything not stated.\n\n\(lines)"
+        if omitted > 0 {
+            prompt += "\n(\(omitted) further summaries omitted to fit the context window.)\n"
+        }
 
         let session = LanguageModelSession(instructions: Prompts.reduce)
         let response = try await session.respond(
