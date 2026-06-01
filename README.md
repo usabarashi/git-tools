@@ -2,11 +2,10 @@
 
 A small collection of personal `git` subcommands.
 
-Today it generates a git commit message — or a branch name — from your staged
-changes using Apple's on-device foundation model. No network, no API keys:
-everything runs locally through the Apple Intelligence model.
-
-Two git subcommands read `git diff --staged` and print to stdout:
+Two of the subcommands generate a git commit message — or a branch name — from
+your staged changes using Apple's on-device foundation model. No network, no API
+keys: everything runs locally through the Apple Intelligence model. They read
+`git diff --staged` and print to stdout:
 
 ```sh
 $ git add .
@@ -22,6 +21,21 @@ feat/truncate-large-patches
 `git branch-name` reshapes the same result into a `type/kebab-summary` branch
 name.
 
+A third subcommand, `git branch-clean`, is pure git plumbing (no model): it
+deletes local branches already integrated into the default branch, including
+**squash-merged** ones that `git branch --merged` misses.
+
+```sh
+$ git branch-clean
+Branches already integrated into origin/main:
+
+  feat/add-retry-logic  abc1234  patch already on origin/main (squash-merged)
+
+Recover any branch with: git branch <name> <sha>
+
+Delete these 1 local branch(es) with `git branch -D`? [y/N]
+```
+
 ## Setup
 
 See [docs/SETUP.md](docs/SETUP.md) for full build and runtime setup. In short:
@@ -30,10 +44,11 @@ See [docs/SETUP.md](docs/SETUP.md) for full build and runtime setup. In short:
   No Xcode required to run.
 - **Build:** full Xcode is required (the `@Generable` macro plugin ships only with
   Xcode, not the Command Line Tools), then `swift build -c release` and symlink
-  both binaries onto your `PATH` as `git-commit-message` and `git-branch-name`.
+  the binaries onto your `PATH`. `git-branch-clean` uses no model and needs
+  neither Xcode nor Apple Intelligence at runtime.
 
 git discovers any `git-<name>` executable on `PATH` as a subcommand, so the tools
-are invoked as `git commit-message` and `git branch-name`.
+are invoked as `git commit-message`, `git branch-name`, and `git branch-clean`.
 
 ## Usage
 
@@ -48,6 +63,10 @@ git switch -c "$(git branch-name)"     # create the branch with it
 
 git commit-message --dry-run           # show the execution plan, then exit
 git commit-message --help
+
+git branch-clean                       # delete merged/squash-merged local branches
+git branch-clean --dry-run             # list candidates only, delete nothing
+git branch-clean --yes --no-fetch      # skip the prompt and the fetch (scripts)
 ```
 
 `--dry-run` works even before Apple Intelligence is enabled, which is handy for
@@ -69,6 +88,14 @@ inspecting how a diff is routed and parsed.
 - Output is always English. Generation uses a low temperature; re-run for a
   fresh take. Progress for large diffs is reported on stderr, leaving stdout
   clean for piping.
+- `git branch-clean` judges each local branch against the remote default branch
+  (`origin/HEAD`, refreshed by a `git fetch --prune` first). A branch is a
+  candidate when it is an ancestor of the default branch (a normal merge), has no
+  net diff from the merge-base, or — the squash case — its aggregate diff already
+  exists upstream as an equivalent patch (a synthetic `commit-tree` compared with
+  `git cherry`). This detects *content* equivalence, not provenance, so it always
+  prompts, shows the reason and recoverable SHA, and protects the current,
+  default, `main`/`master`/`develop`, and `release/*` branches.
 
 ## Behavior on errors
 

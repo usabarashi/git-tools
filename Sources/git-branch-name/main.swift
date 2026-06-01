@@ -1,5 +1,6 @@
 import CommitCore
 import Foundation
+import GitCore
 
 let helpText = """
 git-branch-name — suggest a git branch name from staged changes using

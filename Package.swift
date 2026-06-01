@@ -6,18 +6,27 @@ let package = Package(
     platforms: [.macOS("26.0")],
     targets: [
         .target(
+            name: "GitCore",
+            path: "Sources/GitCore"
+        ),
+        .target(
             name: "CommitCore",
             path: "Sources/CommitCore"
         ),
         .executableTarget(
             name: "git-commit-message",
-            dependencies: ["CommitCore"],
+            dependencies: ["CommitCore", "GitCore"],
             path: "Sources/git-commit-message"
         ),
         .executableTarget(
             name: "git-branch-name",
-            dependencies: ["CommitCore"],
+            dependencies: ["CommitCore", "GitCore"],
             path: "Sources/git-branch-name"
+        ),
+        .executableTarget(
+            name: "git-branch-clean",
+            dependencies: ["GitCore"],
+            path: "Sources/git-branch-clean"
         ),
     ]
 )
