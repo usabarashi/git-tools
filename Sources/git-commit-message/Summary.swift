@@ -24,7 +24,7 @@ struct FileSummaryList {
 /// assembled in code rather than trusting the model's free-form layout.
 @Generable
 struct GroupBullet {
-    @Guide(description: "The group name this bullet is for, copied verbatim from the group header.")
+    @Guide(description: "The bare group name this bullet is for (e.g. \"source\", \"tests\"), without any \"## group:\" prefix.")
     let group: String
 
     @Guide(description: "One short natural-English clause (with spaces, not a slug or file path) summarizing this group's change. If there is only one group, explain WHY the change was made.")
