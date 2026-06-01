@@ -42,18 +42,22 @@ extension DiffParser {
     /// Picks one commit type from per-file evidence, letting the most meaningful
     /// change win (source semantics outrank tests/docs/chore) so a large commit
     /// full of test/config noise doesn't drown the real change.
-    static func aggregateType(files: [FileChange], perFileTypes: [String]) -> String {
+    ///
+    /// `sourceSuggestedTypes` must contain model suggestions for `.source`/
+    /// `.other` files only. Docs/test/config/dependency files get a deterministic
+    /// type from their category, so feeding their model-suggested types in here
+    /// would let a stray suggestion (e.g. `fix` for a docs-only change) override
+    /// that determinism via `typePriority`.
+    static func aggregateType(files: [FileChange], sourceSuggestedTypes: [String]) -> String {
         var effective: [String] = []
         for file in files {
             if let forced = categoryType(file.category) {
                 effective.append(forced)
             }
         }
-        // Source/other files have no category-forced type; fold in every
-        // model-suggested type. The summaries are not index-aligned with `files`
-        // once the pipeline prepends binary/partial summaries or splits a file
-        // into per-hunk summaries, so this must not index by position.
-        effective.append(contentsOf: perFileTypes.map { $0.lowercased() })
+        // Source/other files have no category-forced type, so their model
+        // suggestions are the only evidence of the real change type.
+        effective.append(contentsOf: sourceSuggestedTypes.map { $0.lowercased() })
         for candidate in typePriority where effective.contains(candidate) {
             return candidate
         }

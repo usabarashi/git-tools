@@ -203,9 +203,14 @@ public enum Generator {
     // MARK: - REDUCE
 
     private static func reduce(groups: [CategoryGroup], files: [FileChange]) async throws -> CommitMessage {
+        // Only source/other files (grouped under "source") may contribute
+        // model-suggested types; docs/test/config types are decided
+        // deterministically by category, so their summaries must not feed in.
         let type = DiffParser.aggregateType(
             files: files,
-            perFileTypes: groups.flatMap { $0.summaries.map(\.suggestedType) })
+            sourceSuggestedTypes: groups
+                .filter { $0.name == FileCategory.source.groupName }
+                .flatMap { $0.summaries.map(\.suggestedType) })
         let scope = DiffParser.deriveScope(files)
 
         var prompt = "Write a commit message from these grouped change summaries. Use ONLY these summaries; never infer anything not stated. Produce exactly one bullet per group, copying its name.\n\n"
