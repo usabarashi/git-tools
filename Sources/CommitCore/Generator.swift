@@ -5,7 +5,12 @@ import FoundationModels
 /// receives more than fits the context window, so the model never guesses at
 /// content that was truncated away. Small diffs take a single fast-path call;
 /// large diffs are summarized per file (MAP) and synthesized (REDUCE).
-enum Generator {
+public enum Generator {
+    /// Generates a rendered Conventional Commits message from the staged diff.
+    public static func generateMessage(stat: String, patch: String) async throws -> String {
+        try await generate(stat: stat, patch: patch).rendered()
+    }
+
     /// If the whole diff fits this many characters, one call may suffice.
     static let windowChars = 7_000
     /// Per-call input budget for MAP / condense batches (leaves room for output).
@@ -39,7 +44,7 @@ enum Generator {
 
     /// Human-readable plan for `--dry-run`, exercising the deterministic parser
     /// without any model call (works even when Apple Intelligence is off).
-    static func dryRunDescription(stat: String, patch: String) -> String {
+    public static func dryRunDescription(stat: String, patch: String) -> String {
         let files = DiffParser.parse(patch)
         let fastContext = "Files changed:\n\(stat)\n\nDiff:\n\(patch)"
         if files.count <= maxFastFiles, fastContext.count <= windowChars {
@@ -295,6 +300,6 @@ enum Generator {
     }
 
     private static func progress(_ message: String) {
-        FileHandle.standardError.write(Data("\(message)\n".utf8))
+        try? FileHandle.standardError.write(contentsOf: Data("\(message)\n".utf8))
     }
 }

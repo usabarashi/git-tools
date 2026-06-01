@@ -1,17 +1,26 @@
-# git-commit-message
+# git-tools
 
-Generate a git commit message from your staged changes using Apple's on-device
-foundation model. No network, no API keys — everything runs locally through the
-Apple Intelligence model.
+A small collection of personal `git` subcommands.
 
-It reads `git diff --staged` and prints a single
-[Conventional Commits](https://www.conventionalcommits.org/) message to stdout.
+Today it generates a git commit message — or a branch name — from your staged
+changes using Apple's on-device foundation model. No network, no API keys:
+everything runs locally through the Apple Intelligence model.
 
-```
+Two git subcommands read `git diff --staged` and print to stdout:
+
+```sh
 $ git add .
 $ git commit-message
 feat(diff): truncate large patches to fit the on-device context window
+
+$ git branch-name
+feat/truncate-large-patches
 ```
+
+`git commit-message` prints a single
+[Conventional Commits](https://www.conventionalcommits.org/) message;
+`git branch-name` reshapes the same result into a `type/kebab-summary` branch
+name.
 
 ## Setup
 
@@ -21,35 +30,45 @@ See [docs/SETUP.md](docs/SETUP.md) for full build and runtime setup. In short:
   No Xcode required to run.
 - **Build:** full Xcode is required (the `@Generable` macro plugin ships only with
   Xcode, not the Command Line Tools), then `swift build -c release` and symlink
-  the binary onto your `PATH` as `git-commit-message`.
+  both binaries onto your `PATH` as `git-commit-message` and `git-branch-name`.
 
-git discovers any `git-<name>` executable on `PATH` as a subcommand, so the tool
-is invoked as `git commit-message`.
+git discovers any `git-<name>` executable on `PATH` as a subcommand, so the tools
+are invoked as `git commit-message` and `git branch-name`.
 
 ## Usage
 
 ```sh
 git add <files>
-git commit-message                 # print a message to stdout
+
+git commit-message                     # print a commit message to stdout
 git commit-message | git commit -F -   # commit with it directly
-git commit-message --dry-run       # show the prompt sent to the model, then exit
+
+git branch-name                        # print a type/kebab-summary branch name
+git switch -c "$(git branch-name)"     # create the branch with it
+
+git commit-message --dry-run           # show the execution plan, then exit
 git commit-message --help
 ```
 
 `--dry-run` works even before Apple Intelligence is enabled, which is handy for
-inspecting what the model receives.
+inspecting how a diff is routed and parsed.
 
 ## How it works
 
-- The staged diff is sent to the model as a `--stat` header plus the patch body.
-  Large diffs are trimmed to fit the model's ~4k-token context window: structural
-  lines (file and hunk headers) are always kept, and changed lines fill the
-  remaining budget. If a diff still overflows, the tool retries with the file
-  list only.
-- The model returns a structured `CommitMessage` (`type` / `scope` / `subject` /
-  `body`) via guided generation, which is rendered to Conventional Commits text.
-- Output is always English. Generation uses a low temperature for stable results;
-  re-run to get a fresh take.
+- Small, focused diffs are summarized in a single model call.
+- Larger diffs are handled with map-reduce so no model call ever exceeds the
+  model's small context window: each file is summarized from its own untruncated
+  diff (MAP), then the summaries are grouped by file category and synthesized
+  into one message (REDUCE). This keeps the model from inventing changes for
+  content it cannot see.
+- For larger diffs the commit type, scope, and body grouping are decided
+  deterministically in code (from file paths and categories) rather than by the
+  model; small diffs are model-authored and then mechanically normalized.
+- `git branch-name` runs the same pipeline and formats `type` + `subject` into a
+  git-ref-safe `type/kebab-summary` slug.
+- Output is always English. Generation uses a low temperature; re-run for a
+  fresh take. Progress for large diffs is reported on stderr, leaving stdout
+  clean for piping.
 
 ## Behavior on errors
 
