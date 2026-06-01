@@ -44,10 +44,11 @@ extension DiffParser {
     /// full of test/config noise doesn't drown the real change.
     ///
     /// `sourceSuggestedTypes` must contain model suggestions for `.source`/
-    /// `.other` files only. Docs/test/config/dependency files get a deterministic
-    /// type from their category, so feeding their model-suggested types in here
-    /// would let a stray suggestion (e.g. `fix` for a docs-only change) override
-    /// that determinism via `typePriority`.
+    /// `.other` files only. Every other category (docs, test, config, dependency,
+    /// generated, binary) gets a deterministic type from `categoryType`, so
+    /// feeding their model-suggested types in here would let a stray suggestion
+    /// (e.g. `fix` for a docs-only change) override that determinism via
+    /// `typePriority`.
     static func aggregateType(files: [FileChange], sourceSuggestedTypes: [String]) -> String {
         var effective: [String] = []
         for file in files {
