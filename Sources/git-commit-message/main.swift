@@ -1,6 +1,7 @@
 import CommitCore
 import Foundation
 import GitCore
+import ModelCore
 
 let helpText = """
 git-commit-message — generate a commit message from staged changes using

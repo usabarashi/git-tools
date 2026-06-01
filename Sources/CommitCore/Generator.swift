@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import GitCore
 
 /// Generates a commit message under a single invariant: no model call ever
 /// receives more than fits the context window, so the model never guesses at

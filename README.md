@@ -36,6 +36,22 @@ Recover any branch with: git branch <name> <sha>
 Delete these 1 local branch(es) with `git branch -D`? [y/N]
 ```
 
+A fourth subcommand, `git secret-check`, is an **advisory** on-device AI pass
+over the staged diff: it asks the model whether any added lines look like real
+secrets (API keys, tokens, passwords, private keys, credentials) and reports
+them with the value masked. It complements — does not replace — a deterministic
+scanner like [gitleaks](https://github.com/gitleaks/gitleaks); a clean result
+does not prove the diff is secret-free.
+
+```sh
+$ git add .
+$ git secret-check
+Possible secrets in staged changes (advisory):
+
+  config/app.env — API key [high] sk-9…[redacted]
+      assigned to a production-looking variable on an added line
+```
+
 ## Setup
 
 See [docs/SETUP.md](docs/SETUP.md) for full build and runtime setup. In short:
@@ -48,7 +64,8 @@ See [docs/SETUP.md](docs/SETUP.md) for full build and runtime setup. In short:
   neither Xcode nor Apple Intelligence at runtime.
 
 git discovers any `git-<name>` executable on `PATH` as a subcommand, so the tools
-are invoked as `git commit-message`, `git branch-name`, and `git branch-clean`.
+are invoked as `git commit-message`, `git branch-name`, `git branch-clean`, and
+`git secret-check`.
 
 ## Usage
 
@@ -67,6 +84,10 @@ git commit-message --help
 git branch-clean                       # delete merged/squash-merged local branches
 git branch-clean --dry-run             # list candidates only, delete nothing
 git branch-clean --yes --no-fetch      # skip the prompt and the fetch (scripts)
+
+git secret-check                       # advisory AI scan of staged changes for secrets
+git secret-check --dry-run             # list files that would be scanned, no model
+git secret-check --fail-on medium      # exit non-zero on medium+ confidence findings
 ```
 
 `--dry-run` works even before Apple Intelligence is enabled, which is handy for
@@ -96,6 +117,14 @@ inspecting how a diff is routed and parsed.
   `git cherry`). This detects *content* equivalence, not provenance, so it always
   prompts, shows the reason and recoverable SHA, and protects the current,
   default, `main`/`master`/`develop`, and `release/*` branches.
+- `git secret-check` scans the staged diff per file and never truncates: each
+  file's added lines are sent to the model whole, and a file too large for the
+  context window is split into overlapping windows so cross-line context (e.g. a
+  user/password pair) survives. The diff is treated as untrusted data, obvious
+  placeholders are ignored, and the secret value is masked locally — the model is
+  never trusted to echo it. Exit is `0` when clean, `1` on findings at or above
+  `--fail-on` (default `high`), and `2` when a file could not be fully scanned or
+  the model is unavailable, so a clean result is never overstated.
 
 ## Behavior on errors
 
