@@ -25,9 +25,11 @@ struct RawFindingList {
 }
 
 /// On-device, advisory secret detection over a staged diff. Complements (never
-/// replaces) a deterministic scanner like gitleaks. Scans only added lines, in
-/// bounded per-file pieces, and never truncates: content that cannot be scanned
-/// is reported rather than silently passed.
+/// replaces) a deterministic scanner like gitleaks. Each file's diff is sent to
+/// the model whole (header, context, and added lines) and the model is asked to
+/// report only secrets on added lines; scanning is done in bounded per-file
+/// pieces and never truncates — content that cannot be scanned is reported
+/// rather than silently passed.
 public enum SecretScanner {
     /// Pieces larger than this are split so each model call stays bounded.
     static let windowChars = 7_000
@@ -41,7 +43,9 @@ public enum SecretScanner {
     /// no model call (works even when Apple Intelligence is off).
     public static func plan(stat: String, patch: String) -> String {
         let files = DiffParser.parse(patch)
-        var out = "Would scan \(files.count) changed file(s) against the on-device model:\n"
+        let scannable = files.filter { !$0.isBinary }
+        var out =
+            "Would scan \(scannable.count) of \(files.count) changed file(s) against the on-device model:\n"
         for file in files {
             let note = file.isBinary ? " [binary, skipped]" : ""
             out += "- \(file.path)\(note)\n"
@@ -52,7 +56,7 @@ public enum SecretScanner {
 
     // MARK: - Scan
 
-    public static func scan(stat: String, patch: String) async throws -> ScanResult {
+    public static func scan(patch: String) async throws -> ScanResult {
         let files = DiffParser.parse(patch)
         var findings: [Finding] = []
         var incomplete: [String] = []
@@ -120,44 +124,62 @@ public enum SecretScanner {
         if file.patch.count <= windowChars { return ([file.patch], false) }
 
         let header = file.header
+        // Length the header contributes to an assembled piece, including the
+        // newline that separates it from the body.
+        let headerPrefixCount = header.isEmpty ? 0 : header.count + 1
         func assemble(_ window: [String]) -> String {
             header.isEmpty
                 ? window.joined(separator: "\n") : "\(header)\n\(window.joined(separator: "\n"))"
         }
-        func fits(_ window: [String]) -> Bool { assemble(window).count <= windowChars }
+        // Assembled length of a window holding `lineSum` content chars across
+        // `lineCount` lines (the `\n` separators number lineCount - 1). Computed
+        // with integer arithmetic so the inner loop never re-joins/re-counts.
+        func length(lineSum: Int, lineCount: Int) -> Int {
+            headerPrefixCount + lineSum + max(0, lineCount - 1)
+        }
 
         var pieces: [String] = []
         var truncated = false
         for hunk in file.hunks {
-            let body = assemble([hunk])
-            if body.count <= windowChars {
-                pieces.append(body)
+            if headerPrefixCount + hunk.count <= windowChars {
+                pieces.append(assemble([hunk]))
                 continue
             }
             // Oversized hunk: split its lines into overlapping windows so every
             // line is scanned and cross-line context is preserved.
             let lines = hunk.components(separatedBy: "\n")
             var window: [String] = []
+            var windowSum = 0
             for line in lines {
+                let lineCount = line.count
                 // A line that cannot fit even alone (with the header) is skipped
                 // and the file is reported as incompletely scanned.
-                if !fits([line]) {
+                if length(lineSum: lineCount, lineCount: 1) > windowChars {
                     if !window.isEmpty {
                         pieces.append(assemble(window))
                         window = []
+                        windowSum = 0
                     }
                     truncated = true
                     continue
                 }
-                if fits(window + [line]) {
+                if length(lineSum: windowSum + lineCount, lineCount: window.count + 1) <= windowChars {
                     window.append(line)
+                    windowSum += lineCount
                 } else {
                     pieces.append(assemble(window))
                     // Retain an overlap suffix, trimmed from the front until it
                     // fits together with the incoming line.
                     var overlap = Array(window.suffix(overlapLines))
-                    while !overlap.isEmpty, !fits(overlap + [line]) { overlap.removeFirst() }
+                    var overlapSum = overlap.reduce(0) { $0 + $1.count }
+                    while !overlap.isEmpty,
+                        length(lineSum: overlapSum + lineCount, lineCount: overlap.count + 1)
+                            > windowChars
+                    {
+                        overlapSum -= overlap.removeFirst().count
+                    }
                     window = overlap + [line]
+                    windowSum = overlapSum + lineCount
                 }
             }
             if !window.isEmpty { pieces.append(assemble(window)) }
@@ -186,11 +208,14 @@ public enum SecretScanner {
         return String(redactTokens(oneLine).prefix(160))
     }
 
-    /// Replaces runs of 20+ token characters (letters, digits, `_`, `-`) with a
-    /// redaction marker. Ordinary prose words are shorter; opaque keys/tokens are
-    /// not, so this strips embedded secrets while leaving the explanation intact.
+    /// Replaces runs of 20+ token characters with a redaction marker. The set
+    /// includes base64/URL-safe symbols (`+ / = _ -`) so a base64/JWT/AWS-style
+    /// secret is not split into sub-threshold runs that slip through; ordinary
+    /// prose is still broken by spaces, so explanations survive intact.
     static func redactTokens(_ text: String) -> String {
-        func isToken(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "-" }
+        func isToken(_ c: Character) -> Bool {
+            c.isLetter || c.isNumber || c == "_" || c == "-" || c == "+" || c == "/" || c == "="
+        }
         var out = ""
         var run = ""
         func flush() {

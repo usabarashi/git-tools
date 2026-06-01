@@ -19,13 +19,15 @@ USAGE:
 
 OPTIONS:
     --dry-run         List the files that would be scanned, then exit (no model).
-    --report-only     Always exit 0 (still prints findings); for noisy advisory use.
+    --report-only     Exit 0 even when secrets are found (still prints them).
+                      An incomplete scan or an unavailable model still exits 2,
+                      so a result is never silently treated as clean.
     --fail-on LEVEL   Minimum confidence that causes a non-zero exit:
                       high (default), medium, or low.
     -h, --help        Show this help.
 
 EXIT CODES:
-    0  no findings at or above the --fail-on level
+    0  no findings at or above the --fail-on level (or --report-only)
     1  findings at or above the --fail-on level
     2  scan incomplete, model unavailable, or an error occurred
 """
@@ -101,9 +103,11 @@ if let reason = ModelAvailability.unavailableReason() {
 
 let result: ScanResult
 do {
-    result = try await SecretScanner.scan(stat: stat, patch: patch)
+    result = try await SecretScanner.scan(patch: patch)
 } catch {
-    fail("scan failed: \(error)")
+    // Never interpolate the raw error: a decode/model error can embed response
+    // text or diff fragments, i.e. the very secret this tool exists to protect.
+    fail("scan failed")
 }
 
 // MARK: - Report
