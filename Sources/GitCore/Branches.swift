@@ -39,9 +39,18 @@ extension Git {
         return result.status == 0
     }
 
-    /// All local branch short names.
+    /// Whether `ref` resolves to an actual commit (not a dangling symbolic ref).
+    public static func commitExists(_ ref: String) -> Bool {
+        guard let result = try? capture(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"])
+        else { return false }
+        return result.status == 0
+    }
+
+    /// All local branch names (e.g. `feature/x`). Uses `lstrip=2` rather than
+    /// `:short` so the name is always the exact ref under `refs/heads/`; `:short`
+    /// can render as `heads/x` to disambiguate from a same-named tag.
     public static func localBranches() -> [String] {
-        guard let out = try? run(["for-each-ref", "--format=%(refname:short)", "refs/heads/"])
+        guard let out = try? run(["for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads/"])
         else { return [] }
         return out.split(whereSeparator: \.isNewline).map(String.init)
     }
@@ -71,9 +80,19 @@ extension Git {
     }
 
     /// Creates an in-memory commit holding `tree` on top of `parent` and returns
-    /// its SHA. Touches neither the index nor the working tree.
+    /// its SHA. Touches neither the index nor the working tree. A synthetic
+    /// identity is supplied so the probe succeeds even when the repo has no
+    /// `user.name`/`user.email` configured (otherwise `commit-tree` exits 128).
     public static func commitTree(tree: String, parent: String) throws -> String {
-        let out = try run(["commit-tree", tree, "-p", parent, "-m", "branch-clean-probe"])
+        let identity = [
+            "GIT_AUTHOR_NAME": "git-branch-clean",
+            "GIT_AUTHOR_EMAIL": "git-branch-clean@localhost",
+            "GIT_COMMITTER_NAME": "git-branch-clean",
+            "GIT_COMMITTER_EMAIL": "git-branch-clean@localhost",
+        ]
+        let out = try run(
+            ["commit-tree", tree, "-p", parent, "-m", "branch-clean-probe"],
+            environment: identity)
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

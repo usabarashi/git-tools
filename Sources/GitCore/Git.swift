@@ -31,10 +31,18 @@ public enum Git {
     /// so that a large diff on one stream cannot fill its pipe buffer and
     /// deadlock the child while we block reading the other.
     @discardableResult
-    public static func capture(_ arguments: [String]) throws -> Result {
+    public static func capture(_ arguments: [String], environment: [String: String]? = nil) throws
+        -> Result
+    {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git"] + arguments
+        if let environment {
+            // Layer overrides onto the inherited environment so we keep PATH etc.
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in
+                new
+            }
+        }
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -64,8 +72,10 @@ public enum Git {
 
     /// Runs `git` and returns its standard output, throwing on a non-zero exit.
     @discardableResult
-    public static func run(_ arguments: [String]) throws -> String {
-        let result = try capture(arguments)
+    public static func run(_ arguments: [String], environment: [String: String]? = nil) throws
+        -> String
+    {
+        let result = try capture(arguments, environment: environment)
         guard result.status == 0 else {
             throw GitError.commandFailed(args: arguments, message: result.stderr)
         }

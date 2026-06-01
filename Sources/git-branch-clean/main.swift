@@ -80,6 +80,13 @@ guard let defaultBranch = Git.defaultBranch() else {
 let base = "refs/remotes/origin/\(defaultBranch)"
 let baseLabel = "origin/\(defaultBranch)"
 
+// Guard against a dangling origin/HEAD or a remote with no commits: without
+// this every classification would fail closed and we'd misreport "nothing to
+// delete" instead of the real setup problem.
+guard Git.commitExists(base) else {
+    fail("\(baseLabel) does not resolve to a commit (origin/HEAD may be dangling). Run `git fetch` or `git remote set-head origin --auto`")
+}
+
 // MARK: - Collect candidates
 
 var protectedBranches: Set<String> = ["main", "master", "develop", defaultBranch]
