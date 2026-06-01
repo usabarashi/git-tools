@@ -11,12 +11,12 @@ permissions:
 
 jobs:
   build:
-    # NOTE: this build requires macOS 26 + Xcode 26 (the FoundationModels SDK
-    # targets macosx26.0 and @Generable needs the FoundationModelsMacros plugin
-    # from Xcode 26). `macos-latest` only works once GitHub points it at macOS 26;
-    # while it still resolves to an older image the build will fail. Pin to
-    # `macos-26` if that happens.
-    runs-on: macos-latest
+    # Must be macos-26: the binary links FoundationModels.framework, which only
+    # exists on macOS 26 at runtime. `macos-latest` currently resolves to an
+    # older OS where Xcode 26's SDK lets the build succeed but the binary then
+    # fails to load FoundationModels at runtime ("built for macOS 26.0 which is
+    # newer than running OS"). Revisit only once macos-latest points at macOS 26.
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
