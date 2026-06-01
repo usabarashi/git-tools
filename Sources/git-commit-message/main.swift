@@ -21,7 +21,7 @@ OPTIONS:
 """
 
 func fail(_ message: String) -> Never {
-    FileHandle.standardError.write(Data("error: \(message)\n".utf8))
+    try? FileHandle.standardError.write(contentsOf: Data("error: \(message)\n".utf8))
     exit(1)
 }
 

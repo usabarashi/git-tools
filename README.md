@@ -8,7 +8,7 @@ everything runs locally through the Apple Intelligence model.
 
 Two git subcommands read `git diff --staged` and print to stdout:
 
-```
+```sh
 $ git add .
 $ git commit-message
 feat(diff): truncate large patches to fit the on-device context window

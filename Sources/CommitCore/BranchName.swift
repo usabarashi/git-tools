@@ -29,7 +29,7 @@ public enum BranchName {
         var slug = ""
         var pendingDash = false
         for scalar in text.lowercased().unicodeScalars {
-            if scalar.properties.isAlphabetic && scalar.isASCII || ("0"..."9").contains(scalar) {
+            if ("a"..."z").contains(scalar) || ("0"..."9").contains(scalar) {
                 slug.unicodeScalars.append(scalar)
                 pendingDash = false
             } else if !slug.isEmpty {

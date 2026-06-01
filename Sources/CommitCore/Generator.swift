@@ -300,6 +300,6 @@ public enum Generator {
     }
 
     private static func progress(_ message: String) {
-        FileHandle.standardError.write(Data("\(message)\n".utf8))
+        try? FileHandle.standardError.write(contentsOf: Data("\(message)\n".utf8))
     }
 }
