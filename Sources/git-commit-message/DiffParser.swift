@@ -114,10 +114,17 @@ enum DiffParser {
         if let plus = lines.first(where: { $0.hasPrefix("+++ b/") }) {
             return String(plus.dropFirst("+++ b/".count))
         }
-        // Fall back to the "diff --git a/X b/Y" line.
-        if let git = lines.first(where: { $0.hasPrefix("diff --git ") }),
-           let range = git.range(of: " b/") {
-            return String(git[range.upperBound...])
+        // Fall back to the "diff --git a/X b/Y" line. Search backwards so a
+        // " b/" inside the a/ path doesn't match first, and handle git's quoting
+        // of paths with spaces/special characters ("a/x" "b/y").
+        if let git = lines.first(where: { $0.hasPrefix("diff --git ") }) {
+            let quotes = CharacterSet(charactersIn: "\"")
+            if let range = git.range(of: " b/", options: .backwards) {
+                return String(git[range.upperBound...]).trimmingCharacters(in: quotes)
+            }
+            if let range = git.range(of: " \"b/", options: .backwards) {
+                return String(git[range.upperBound...]).trimmingCharacters(in: quotes)
+            }
         }
         return "(unknown)"
     }
@@ -141,7 +148,13 @@ enum DiffParser {
         if lower.hasPrefix("docs/") || lower.contains("/docs/")
             || ["md", "rst", "txt", "adoc"].contains(ext)
             || name == "license" || name.hasPrefix("readme") { return .docs }
-        if lower.contains("test") || lower.contains("spec") || lower.contains("__tests__") {
+        // Match path segments / filename tokens, not raw substrings, so paths
+        // like "latest" or "greatest" are not misclassified as tests.
+        let segments = lower.split(separator: "/").map(String.init)
+        let inTestDir = segments.contains {
+            $0 == "test" || $0 == "tests" || $0 == "spec" || $0 == "specs" || $0 == "__tests__"
+        }
+        if inTestDir || name.contains("test") || name.contains("spec") {
             return .test
         }
         let configExts: Set<String> = ["yml", "yaml", "toml", "ini", "cfg", "plist"]
@@ -175,13 +188,16 @@ enum DiffParser {
     /// full of test/config noise doesn't drown the real change.
     static func aggregateType(files: [FileChange], perFileTypes: [String]) -> String {
         var effective: [String] = []
-        for (index, file) in files.enumerated() {
+        for file in files {
             if let forced = categoryType(file.category) {
                 effective.append(forced)
-            } else if index < perFileTypes.count {
-                effective.append(perFileTypes[index].lowercased())
             }
         }
+        // Source/other files have no category-forced type; fold in every
+        // model-suggested type. The summaries are not index-aligned with `files`
+        // once the pipeline prepends binary/partial summaries or splits a file
+        // into per-hunk summaries, so this must not index by position.
+        effective.append(contentsOf: perFileTypes.map { $0.lowercased() })
         for candidate in typePriority where effective.contains(candidate) {
             return candidate
         }
