@@ -1,9 +1,9 @@
 import FoundationModels
 
-enum ModelAvailability {
+public enum ModelAvailability {
     /// Returns `nil` when the on-device model is ready, or a human-readable
     /// reason (for stderr) when it is not (Q6).
-    static func unavailableReason() -> String? {
+    public static func unavailableReason() -> String? {
         switch SystemLanguageModel.default.availability {
         case .available:
             return nil

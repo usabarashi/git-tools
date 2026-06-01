@@ -2,16 +2,16 @@ import CommitCore
 import Foundation
 
 let helpText = """
-git-commit-message — generate a commit message from staged changes using
+git-branch-name — suggest a git branch name from staged changes using
 Apple's on-device foundation model.
 
 USAGE:
-    git commit-message [--dry-run] [--help]
+    git branch-name [--dry-run] [--help]
 
-    Reads `git diff --staged` and prints a single Conventional Commits message
-    to stdout. Pipe it straight into a commit:
+    Reads `git diff --staged` and prints a single `type/kebab-summary` branch
+    name to stdout (e.g. feat/add-retry-logic). Create the branch with it:
 
-        git commit-message | git commit -F -
+        git switch -c "$(git branch-name)"
 
 OPTIONS:
     --dry-run    Print the dry-run execution plan (fast vs map-reduce path and
@@ -70,8 +70,8 @@ if let reason = ModelAvailability.unavailableReason() {
 // MARK: - Generate
 
 do {
-    let message = try await Generator.generateMessage(stat: stat, patch: patch)
-    print(message)
+    let name = try await BranchName.generate(stat: stat, patch: patch)
+    print(name)
 } catch {
     fail("generation failed: \(error)")
 }

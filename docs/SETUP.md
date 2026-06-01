@@ -66,26 +66,28 @@ switch did not take effect — re-run step 2.
 swift build -c release
 ```
 
-The product is a small native binary at `.build/release/git-commit-message`.
-The model is not bundled — it is the system on-device model, linked dynamically.
-The macro is fully expanded at compile time, so the binary has no build-time
-dependency baked in: it runs on any compliant runtime machine without Xcode.
+The products are two small native binaries at `.build/release/git-commit-message`
+and `.build/release/git-branch-name`. The model is not bundled — it is the system
+on-device model, linked dynamically. The macro is fully expanded at compile time,
+so the binaries have no build-time dependency baked in: they run on any compliant
+runtime machine without Xcode.
 
 ### 4. Install on PATH
 
-git discovers any `git-<name>` executable on `PATH` as a subcommand, so naming
-the binary `git-commit-message` makes it callable as `git commit-message`.
+git discovers any `git-<name>` executable on `PATH` as a subcommand, so the
+binaries are callable as `git commit-message` and `git branch-name`.
 
 ```sh
 mkdir -p ~/.local/bin
 ln -sf "$(pwd)/.build/release/git-commit-message" ~/.local/bin/git-commit-message
+ln -sf "$(pwd)/.build/release/git-branch-name" ~/.local/bin/git-branch-name
 
 # Ensure ~/.local/bin is on PATH (add to ~/.zshrc if missing)
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc ;; esac
 ```
 
-A symlink means a later `swift build -c release` updates the installed command
-in place — no reinstall needed.
+Symlinks mean a later `swift build -c release` updates the installed commands in
+place — no reinstall needed.
 
 ---
 

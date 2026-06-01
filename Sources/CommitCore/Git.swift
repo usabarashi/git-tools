@@ -13,7 +13,7 @@ enum GitError: Error, CustomStringConvertible {
     }
 }
 
-enum Git {
+public enum Git {
     /// Runs `git` with the given arguments and returns its standard output.
     /// stdout and stderr are drained concurrently so that a large diff on one
     /// stream cannot fill its pipe buffer and deadlock the child while we block
@@ -50,11 +50,11 @@ enum Git {
         return String(decoding: outData, as: UTF8.self)
     }
 
-    static func stagedStat() throws -> String {
+    public static func stagedStat() throws -> String {
         try run(["diff", "--staged", "--stat"])
     }
 
-    static func stagedPatch() throws -> String {
+    public static func stagedPatch() throws -> String {
         try run(["diff", "--staged"])
     }
 }
