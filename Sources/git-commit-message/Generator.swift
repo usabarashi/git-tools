@@ -16,6 +16,13 @@ enum Generator {
     static let maxFastFiles = 4
     /// Cap files per MAP batch so each summarization call stays focused.
     static let maxBatchFiles = 6
+    /// Floor for a category group's condense budget, so a small group keeps detail.
+    static let minGroupChars = 400
+
+    private struct CategoryGroup {
+        let name: String
+        let summaries: [LabeledSummary]
+    }
 
     static func generate(stat: String, patch: String) async throws -> CommitMessage {
         let files = DiffParser.parse(patch)
@@ -25,8 +32,9 @@ enum Generator {
         }
 
         progress("large change; summarizing \(files.count) files…")
-        let summaries = try await condenseIfNeeded(mapSummaries(files))
-        return try await reduce(summaries: summaries, files: files)
+        let perFile = try await mapSummaries(files)
+        let groups = try await groupAndCondense(summaries: perFile, files: files)
+        return try await reduce(groups: groups, files: files)
     }
 
     /// Human-readable plan for `--dry-run`, exercising the deterministic parser
@@ -128,21 +136,45 @@ enum Generator {
         return response.content.summaries
     }
 
-    // MARK: - Recursive REDUCE (condense oversized summary sets)
+    // MARK: - Group & condense
 
-    private static func condenseIfNeeded(_ summaries: [LabeledSummary]) async throws -> [LabeledSummary] {
-        var current = summaries
-        while joined(current).count > batchChars {
-            progress("condensing \(current.count) summaries…")
-            var next: [LabeledSummary] = []
-            for group in chunk(current) {
-                next.append(contentsOf: try await condenseCall(group))
-            }
-            // Safety: stop if a pass fails to shrink the set.
-            if next.count >= current.count { break }
-            current = next
+    /// Groups per-file summaries by deterministic FileCategory, then condenses
+    /// each group down to a proportional share of the budget so the assembled
+    /// groups fit the reduce window. Grouping happens before condensing so the
+    /// labels still map back to categories.
+    private static func groupAndCondense(summaries: [LabeledSummary], files: [FileChange]) async throws -> [CategoryGroup] {
+        var buckets: [FileCategory: [LabeledSummary]] = [:]
+        for summary in summaries {
+            let category = DiffParser.category(forLabel: summary.label, files: files)
+            buckets[category, default: []].append(summary)
         }
-        return current
+
+        var ordered: [(category: FileCategory, summaries: [LabeledSummary])] = []
+        for category in DiffParser.categoryOrder where buckets[category] != nil {
+            ordered.append((category, buckets[category]!))
+        }
+
+        // Proportional budget weighted by summary volume, with a floor, so the
+        // dominant group is not starved and tiny groups are not over-allocated.
+        let weights = ordered.map { max(joined($0.summaries).count, 1) }
+        let totalWeight = max(weights.reduce(0, +), 1)
+
+        var result: [CategoryGroup] = []
+        for (index, group) in ordered.enumerated() {
+            let target = max(minGroupChars, batchChars * weights[index] / totalWeight)
+            var current = group.summaries
+            while joined(current).count > target {
+                progress("condensing \(group.category.groupName) (\(current.count) summaries)…")
+                var next: [LabeledSummary] = []
+                for piece in chunk(current) {
+                    next.append(contentsOf: try await condenseCall(piece))
+                }
+                if next.count >= current.count { break }
+                current = next
+            }
+            result.append(CategoryGroup(name: group.category.groupName, summaries: current))
+        }
+        return result
     }
 
     private static func condenseCall(_ summaries: [LabeledSummary]) async throws -> [LabeledSummary] {
@@ -160,26 +192,17 @@ enum Generator {
 
     // MARK: - REDUCE
 
-    private static func reduce(summaries: [LabeledSummary], files: [FileChange]) async throws -> CommitMessage {
-        let type = DiffParser.aggregateType(files: files, perFileTypes: summaries.map(\.suggestedType))
+    private static func reduce(groups: [CategoryGroup], files: [FileChange]) async throws -> CommitMessage {
+        let type = DiffParser.aggregateType(
+            files: files,
+            perFileTypes: groups.flatMap { $0.summaries.map(\.suggestedType) })
         let scope = DiffParser.deriveScope(files)
 
-        // Cap the summary list to the budget so the reduce call honors the
-        // no-call-exceeds-the-window invariant even when condense could not fully
-        // shrink the set; any drop is stated honestly rather than silently.
-        var lines = ""
-        var omitted = 0
-        for s in summaries {
-            let line = "- [\(s.label)] \(s.summary)\n"
-            if lines.count + line.count > batchChars {
-                omitted += 1
-            } else {
-                lines += line
-            }
-        }
-        var prompt = "Write a commit message from these per-file change summaries. Use ONLY these summaries; never infer anything not stated.\n\n\(lines)"
-        if omitted > 0 {
-            prompt += "\n(\(omitted) further summaries omitted to fit the context window.)\n"
+        var prompt = "Write a commit message from these grouped change summaries. Use ONLY these summaries; never infer anything not stated. Produce exactly one bullet per group, copying its name.\n\n"
+        for group in groups {
+            prompt += "## group: \(group.name)\n"
+            for summary in group.summaries { prompt += "- \(summary.summary)\n" }
+            prompt += "\n"
         }
 
         let session = LanguageModelSession(instructions: Prompts.reduce)
@@ -187,7 +210,26 @@ enum Generator {
             to: prompt, generating: ReducedMessage.self,
             options: GenerationOptions(temperature: 0.2)
         )
-        return CommitMessage(type: type, scope: scope, subject: response.content.subject, body: response.content.body)
+
+        // Deterministic assembly: exactly one bullet per group, in priority
+        // order, matched to the model's output by group name with a fallback.
+        var bullets: [String] = []
+        for group in groups {
+            let text = response.content.bullets
+                .first { normalizeGroup($0.group) == normalizeGroup(group.name) }
+                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { $0.isEmpty ? nil : $0 }
+                ?? (group.summaries.first?.summary ?? "update \(group.name)")
+            bullets.append("- \(text)")
+        }
+        return CommitMessage(
+            type: type, scope: scope,
+            subject: response.content.subject,
+            body: bullets.joined(separator: "\n"))
+    }
+
+    private static func normalizeGroup(_ name: String) -> String {
+        name.lowercased().trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Helpers

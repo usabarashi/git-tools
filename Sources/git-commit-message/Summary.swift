@@ -20,15 +20,27 @@ struct FileSummaryList {
     let summaries: [FileSummary]
 }
 
-/// The REDUCE call only authors the prose; the type and scope are decided
-/// deterministically, so the model cannot hallucinate them.
+/// One body bullet, anchored to a deterministic group so it can be matched and
+/// assembled in code rather than trusting the model's free-form layout.
+@Generable
+struct GroupBullet {
+    @Guide(description: "The group name this bullet is for, copied verbatim from the group header.")
+    let group: String
+
+    @Guide(description: "One short natural-English clause (with spaces, not a slug or file path) summarizing this group's change. If there is only one group, explain WHY the change was made.")
+    let text: String
+}
+
+/// The REDUCE call authors only the prose; the type and scope are decided
+/// deterministically, and the bullets are assembled per group in code, so the
+/// model cannot hallucinate the structure.
 @Generable
 struct ReducedMessage {
-    @Guide(description: "Imperative-mood subject, lower-case first word, no trailing period, at most 50 characters, capturing the dominant change.")
+    @Guide(description: "Imperative-mood subject with spaces (not a slug or file name), lower-case first word, no trailing period, at most 50 characters, capturing the dominant change.")
     let subject: String
 
-    @Guide(description: "Body: one '- ' bullet per distinct logical change, grounded ONLY in the provided summaries. Leave empty for a single self-evident change.")
-    let body: String
+    @Guide(description: "Exactly one bullet per group shown, with the group name copied verbatim.")
+    let bullets: [GroupBullet]
 }
 
 /// Internal (non-Generable) carrier used while orchestrating, so deterministic

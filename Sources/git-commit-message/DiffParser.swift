@@ -9,6 +9,19 @@ enum FileStatus: String {
 /// change is a chore, not a feat).
 enum FileCategory {
     case source, test, docs, config, dependency, generated, binary, other
+
+    /// Display name used as the deterministic group key in the reduce step.
+    var groupName: String {
+        switch self {
+        case .source, .other: return "source"
+        case .test: return "tests"
+        case .docs: return "docs"
+        case .config: return "config"
+        case .dependency: return "dependencies"
+        case .generated: return "generated"
+        case .binary: return "binary"
+        }
+    }
 }
 
 /// One file's worth of a unified diff, parsed deterministically before any
@@ -202,6 +215,19 @@ enum DiffParser {
             return candidate
         }
         return effective.first ?? "chore"
+    }
+
+    /// Order in which category groups appear in the body (most meaningful first).
+    static let categoryOrder: [FileCategory] = [
+        .source, .test, .docs, .config, .dependency, .generated, .binary,
+    ]
+
+    /// Maps a summary label back to its file's category for grouping. Labels are
+    /// either an exact path or "path <hunk header>"; `.other` folds into source.
+    static func category(forLabel label: String, files: [FileChange]) -> FileCategory {
+        let file = files.first { label == $0.path || label.hasPrefix($0.path + " ") }
+        let category = file?.category ?? .source
+        return category == .other ? .source : category
     }
 
     /// Derives a scope deterministically from paths (single file -> its stem;
