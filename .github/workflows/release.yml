@@ -59,14 +59,23 @@ jobs:
           git restore --staged _ci_probe.txt
           rm -f _ci_probe.txt
 
+      # Bundle all four CLIs into a single archive so the suite is downloaded
+      # once, not file-by-file. The name carries the target (macos26-arm64) so
+      # the artifact never looks architecture-neutral; binaries sit under a
+      # top-level dir so extraction does not scatter files into the cwd. arm64
+      # only: Apple Intelligence requires Apple silicon. The checksum sits
+      # OUTSIDE the archive: a checksum packed inside would be rewritten
+      # alongside any tampering and verify nothing.
       - name: Package binaries
         run: |
-          mkdir -p dist
-          # arm64 only: Apple Intelligence requires Apple silicon.
+          name="git-tools-${{ steps.version.outputs.value }}-macos26-arm64"
+          mkdir -p "stage/$name" dist
           for bin in git-commit-message git-branch-name git-branch-clean git-secret-check; do
-            cp ".build/release/$bin" "dist/$bin"
-            (cd dist && shasum -a 256 "$bin" > "$bin.sha256")
+            cp ".build/release/$bin" "stage/$name/$bin"
           done
+          archive="$name.tar.gz"
+          tar -czf "dist/$archive" -C stage "$name"
+          (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
 
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
