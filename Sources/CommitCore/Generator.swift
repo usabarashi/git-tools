@@ -65,11 +65,13 @@ public enum Generator {
         if files.count <= maxFastFiles, fastContext.count <= inputBudget(instructions: Prompts.single, scaffold: 80) {
             do {
                 return try await generateSingle(context: fastContext)
-            } catch let error where isContextOverflow(error) {
-                // The char budget under-counted the tokens (e.g. dense or CJK
-                // content): fall through to the map-reduce path, which fits each
-                // call to the window and retries on overflow.
-                progress("fast path overflowed the model window; falling back to map-reduce…")
+            } catch let error where isRecoverableGenerationFailure(error) {
+                // The single call either overflowed the window (the char budget
+                // under-counted dense or CJK tokens) or decoded to malformed
+                // output (the model looped until its JSON was truncated). Fall
+                // through to map-reduce, which fits each call to the window and
+                // recovers per batch.
+                progress("fast path could not generate cleanly; falling back to map-reduce…")
             }
         }
 
@@ -110,6 +112,24 @@ public enum Generator {
 
     // MARK: - MAP
 
+    /// A faithful summary for the file categories that must never reach the
+    /// model — binary (no text), dependency lockfiles, and generated files (long,
+    /// repetitive lists the small model loops on). `nil` means "let the MAP step
+    /// summarize this for real". The +/-counts keep the deterministic line
+    /// grounded in the actual diff size.
+    private static func deterministicSummary(for file: FileChange) -> String? {
+        switch file.category {
+        case .binary:
+            return "binary file \(file.status.rawValue)"
+        case .dependency:
+            return "dependency file \(file.status.rawValue) (+\(file.additions)/-\(file.deletions))"
+        case .generated:
+            return "generated file \(file.status.rawValue) (+\(file.additions)/-\(file.deletions))"
+        default:
+            return nil
+        }
+    }
+
     private static func mapSummaries(_ files: [FileChange]) async throws -> [LabeledSummary] {
         var deterministic: [LabeledSummary] = []
         var pieces: [(label: String, text: String)] = []
@@ -118,10 +138,16 @@ public enum Generator {
         let mapBudget = inputBudget(instructions: Prompts.map, scaffold: 150)
 
         for file in files {
-            if file.isBinary {
+            // Binary files, dependency lockfiles, and generated files carry no
+            // prose worth a model call: their diffs are absent (binary) or long,
+            // highly repetitive lists (a lockfile, a regenerated artifact) that
+            // make the small model loop until its output is truncated mid-JSON.
+            // Summarize them deterministically, so a giant Cargo.lock costs zero
+            // model calls and one honest summary instead of dozens of batches.
+            if let summary = deterministicSummary(for: file) {
                 deterministic.append(LabeledSummary(
                     label: file.path,
-                    summary: "binary file \(file.status.rawValue)",
+                    summary: summary,
                     suggestedType: DiffParser.categoryType(file.category) ?? "chore"))
                 continue
             }
@@ -159,12 +185,14 @@ public enum Generator {
         return results
     }
 
-    /// Summarizes one batch, retrying on a real context overflow by halving the
-    /// batch. The character budget is only a guess — the model counts tokens,
-    /// and CJK or otherwise dense diffs can tokenize at ~1 char/token, so a batch
-    /// that fit by characters may still overflow. Halving (down to a single piece
-    /// summarized as partial) keeps the run honest and complete instead of
-    /// aborting the whole commit message on one oversized batch.
+    /// Summarizes one batch, retrying by halving it when a call overflows the
+    /// window OR decodes to malformed output (the small model can loop on
+    /// repetitive input until its JSON is truncated). The character budget is
+    /// only a guess — the model counts tokens, and CJK or otherwise dense diffs
+    /// can tokenize at ~1 char/token, so a batch that fit by characters may still
+    /// fail. Halving (down to a single piece summarized as partial) keeps the run
+    /// honest and complete instead of aborting the whole commit message on one
+    /// bad batch.
     private static func summarize(_ pieces: [(label: String, text: String)]) async throws -> [LabeledSummary] {
         guard !pieces.isEmpty else { return [] }
         do {
@@ -177,7 +205,7 @@ public enum Generator {
                 }
                 return LabeledSummary(label: piece.label, summary: "changed", suggestedType: "chore")
             }
-        } catch let error where isContextOverflow(error) {
+        } catch let error where isRecoverableGenerationFailure(error) {
             guard pieces.count > 1 else {
                 return try await summarizeOversized(pieces[0])
             }
@@ -188,8 +216,10 @@ public enum Generator {
         }
     }
 
-    /// Handles a single piece that overflows the window on its own (common when
-    /// its diff is short in characters but dense in tokens, e.g. CJK strings).
+    /// Handles a single piece the model cannot summarize cleanly on its own — it
+    /// overflows the window (common when its diff is short in characters but dense
+    /// in tokens, e.g. CJK strings) or its repetitive content makes the model
+    /// loop until the output is truncated.
     /// Splits the text in half and summarizes each part so the change is still
     /// grounded; only when it can no longer be split do we fall back to an honest
     /// partial summary rather than truncating and passing it off as complete. The
@@ -226,12 +256,21 @@ public enum Generator {
         return [head, tail]
     }
 
-    /// True for the FoundationModels error raised when a call's tokens exceed the
-    /// context window, the one overflow we recover from by splitting the input.
-    private static func isContextOverflow(_ error: Error) -> Bool {
+    /// True for the FoundationModels generation errors we recover from by
+    /// splitting the input and retrying: a context-window overflow, or a
+    /// malformed decode (the small model can loop on repetitive input until its
+    /// output is truncated mid-JSON). Both shrink with a smaller input, so the
+    /// same split-and-retry path applies. Any other generation error (e.g. the
+    /// model becoming unavailable, a guardrail trip) is not recoverable this way
+    /// and propagates instead of triggering a pointless retry storm.
+    private static func isRecoverableGenerationFailure(_ error: Error) -> Bool {
         guard let generationError = error as? LanguageModelSession.GenerationError else { return false }
-        if case .exceededContextWindowSize = generationError { return true }
-        return false
+        switch generationError {
+        case .exceededContextWindowSize, .decodingFailure:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func mapCall(_ pieces: [(label: String, text: String)]) async throws -> [FileSummary] {
