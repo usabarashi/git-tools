@@ -47,8 +47,11 @@ public enum Generator {
 
     /// Characters of input TEXT a call may carry after reserving the window for
     /// the given instructions and an estimate of the fixed prompt scaffolding.
+    /// Clamped at zero, not at `minGroupChars`: a per-group floor belongs only to
+    /// the condense targets (see `groupAndCondense`); applying it here would admit
+    /// input that is guaranteed to overflow when a prompt grows past the window.
     static func inputBudget(instructions: String, scaffold: Int) -> Int {
-        max(minGroupChars, callChars - instructions.count - scaffold)
+        max(0, callChars - instructions.count - scaffold)
     }
 
     private struct CategoryGroup {
@@ -226,7 +229,8 @@ public enum Generator {
     /// True for the FoundationModels error raised when a call's tokens exceed the
     /// context window, the one overflow we recover from by splitting the input.
     private static func isContextOverflow(_ error: Error) -> Bool {
-        if case LanguageModelSession.GenerationError.exceededContextWindowSize = error { return true }
+        guard let generationError = error as? LanguageModelSession.GenerationError else { return false }
+        if case .exceededContextWindowSize = generationError { return true }
         return false
     }
 
@@ -273,13 +277,16 @@ public enum Generator {
         let weights = ordered.map { max(joined($0.summaries).count, 1) }
         let totalWeight = max(weights.reduce(0, +), 1)
         // Allocate the per-group floor first, then split the remainder
-        // proportionally, so the sum of targets never exceeds the budget. With
-        // at most 7 categories the floors always leave room.
-        let remaining = max(0, reduceBudget - ordered.count * minGroupChars)
+        // proportionally, so the sum of targets never exceeds the budget. The
+        // floor is scaled down when the budget cannot seat every group at the
+        // nominal floor (many categories against a tight reduce window), so
+        // `ordered.count * floor` never exceeds `reduceBudget`.
+        let floor = min(minGroupChars, reduceBudget / max(ordered.count, 1))
+        let remaining = max(0, reduceBudget - ordered.count * floor)
 
         var result: [CategoryGroup] = []
         for (index, group) in ordered.enumerated() {
-            let target = minGroupChars + remaining * weights[index] / totalWeight
+            let target = floor + remaining * weights[index] / totalWeight
             var current = group.summaries
             while joined(current).count > target {
                 progress("condensing \(group.category.groupName) (\(current.count) summaries)…")
