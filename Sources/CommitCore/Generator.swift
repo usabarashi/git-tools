@@ -112,9 +112,11 @@ public enum Generator {
 
     // MARK: - MAP
 
-    /// A faithful summary for the file categories that must never reach the
-    /// model — binary (no text), dependency lockfiles, and generated files (long,
-    /// repetitive lists the small model loops on). `nil` means "let the MAP step
+    /// A faithful summary for the file categories whose raw diff must never be
+    /// sent to the model in the MAP step — binary (no text), dependency lockfiles,
+    /// and generated files (long, repetitive lists the small model loops on). The
+    /// resulting summary still feeds CONDENSE/REDUCE like any other; only the
+    /// per-file diff is short-circuited here. `nil` means "let the MAP step
     /// summarize this for real". The +/-counts keep the deterministic line
     /// grounded in the actual diff size.
     private static func deterministicSummary(for file: FileChange) -> String? {
@@ -143,7 +145,8 @@ public enum Generator {
             // highly repetitive lists (a lockfile, a regenerated artifact) that
             // make the small model loop until its output is truncated mid-JSON.
             // Summarize them deterministically, so a giant Cargo.lock costs zero
-            // model calls and one honest summary instead of dozens of batches.
+            // MAP-step model calls and one honest summary instead of dozens of
+            // batches (CONDENSE/REDUCE may still run once over the summaries).
             if let summary = deterministicSummary(for: file) {
                 deterministic.append(LabeledSummary(
                     label: file.path,
