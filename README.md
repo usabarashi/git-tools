@@ -58,8 +58,10 @@ See [docs/SETUP.md](docs/SETUP.md) for full build and runtime setup. In short:
 
 - **Runtime:** macOS 26 (Tahoe)+ on Apple silicon with Apple Intelligence enabled.
   No Xcode required to run.
-- **Build:** full Xcode is required (the `@Generable` macro plugin ships only with
-  Xcode, not the Command Line Tools), then `swift build -c release` and symlink
+- **Build:** full Xcode **26.4+** is required (the `@Generable` macro plugin ships
+  only with Xcode, not the Command Line Tools; the 26.4 SDK declares the
+  `contextSize`/`tokenCount` context-window APIs the build calls), then
+  `swift build -c release` and symlink
   the binaries onto your `PATH`. `git-branch-clean` uses no model and needs
   neither Xcode nor Apple Intelligence at runtime.
 

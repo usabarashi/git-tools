@@ -23,8 +23,16 @@ public enum Generator {
     // closer to ~1.6. Each budget also subtracts the live instruction length, so
     // it stays correct when a prompt in `Prompts` is edited.
 
-    /// Apple FoundationModels hard context window, in tokens (input + output).
-    static let contextTokens = 4_096
+    /// Apple FoundationModels context window, in tokens (input + output), read
+    /// from the live model instead of hardcoded. The on-device window was 4096
+    /// through the 2025 model; a next-generation on-device model can expose a
+    /// larger window, and reading `contextSize` lets every budget below grow
+    /// with it automatically — no constant to bump. Floored at 4096 so a read
+    /// taken while the model is unavailable (e.g. `--dry-run` before Apple
+    /// Intelligence is enabled) can never under-budget below the known-good size.
+    static var contextTokens: Int {
+        max(SystemLanguageModel.default.contextSize, 4_096)
+    }
     /// Tokens held back for the model's own structured output.
     static let reservedOutputTokens = 1_200
     /// Pessimistic characters-per-token for diff content. Plain English code
@@ -34,7 +42,9 @@ public enum Generator {
     /// exact value trades call count for safety, it does not gate correctness.
     static let charsPerToken = 1.2
     /// Characters one call may spend on instructions + prompt scaffolding + text.
-    static let callChars = Int(Double(contextTokens - reservedOutputTokens) * charsPerToken)
+    static var callChars: Int {
+        Int(Double(contextTokens - reservedOutputTokens) * charsPerToken)
+    }
 
     /// The single-call fast path is only safe for a handful of files. Beyond
     /// this, even a diff that fits the window numerically overwhelms the small
@@ -62,7 +72,7 @@ public enum Generator {
     static func generate(stat: String, patch: String) async throws -> CommitMessage {
         let files = DiffParser.parse(patch)
         let fastContext = "Files changed:\n\(stat)\n\nDiff:\n\(patch)"
-        if files.count <= maxFastFiles, fastContext.count <= inputBudget(instructions: Prompts.single, scaffold: 80) {
+        if files.count <= maxFastFiles, await fastContextFitsWindow(fastContext) {
             do {
                 return try await generateSingle(context: fastContext)
             } catch let error where isRecoverableGenerationFailure(error) {
@@ -100,11 +110,40 @@ public enum Generator {
 
     // MARK: - Fast path
 
+    private static func singlePrompt(context: String) -> String {
+        "Generate a commit message for the following staged changes.\n\n\(context)"
+    }
+
+    /// Whether the fast-path single call fits the model's context window.
+    /// Prefers a real token measurement (`tokenCount`, macOS 26.4+) of the exact
+    /// instructions and prompt over the pessimistic character estimate, so a diff
+    /// the character budget would have over-routed to map-reduce can still take
+    /// the coherent single call — the win compounds now that `contextTokens`
+    /// tracks a possibly larger live window. Falls back to the character budget
+    /// when the measurement is unavailable (pre-26.4) or throws (model not
+    /// ready); that character budget remains the sole gate for `--dry-run`, which
+    /// must decide its route with no model at all.
+    private static func fastContextFitsWindow(_ context: String) async -> Bool {
+        if #available(macOS 26.4, *) {
+            let model = SystemLanguageModel.default
+            do {
+                // The two measurements are independent; run them concurrently
+                // and await once so the gate adds one round-trip, not two.
+                async let instructionTokens = model.tokenCount(for: Prompts.single)
+                async let promptTokens = model.tokenCount(for: singlePrompt(context: context))
+                let inputTokens = try await instructionTokens + promptTokens
+                return inputTokens + reservedOutputTokens <= contextTokens
+            } catch {
+                // Model not ready, or measurement failed: fall back to chars.
+            }
+        }
+        return context.count <= inputBudget(instructions: Prompts.single, scaffold: 80)
+    }
+
     private static func generateSingle(context: String) async throws -> CommitMessage {
         let session = LanguageModelSession(instructions: Prompts.single)
-        let prompt = "Generate a commit message for the following staged changes.\n\n\(context)"
         let response = try await session.respond(
-            to: prompt, generating: CommitMessage.self,
+            to: singlePrompt(context: context), generating: CommitMessage.self,
             options: GenerationOptions(temperature: 0.3, maximumResponseTokens: reservedOutputTokens)
         )
         return response.content
