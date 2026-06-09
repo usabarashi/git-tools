@@ -127,9 +127,12 @@ public enum Generator {
         if #available(macOS 26.4, *) {
             let model = SystemLanguageModel.default
             do {
-                let instructionTokens = try await model.tokenCount(for: Prompts.single)
-                let promptTokens = try await model.tokenCount(for: singlePrompt(context: context))
-                return instructionTokens + promptTokens + reservedOutputTokens <= contextTokens
+                // The two measurements are independent; run them concurrently
+                // and await once so the gate adds one round-trip, not two.
+                async let instructionTokens = model.tokenCount(for: Prompts.single)
+                async let promptTokens = model.tokenCount(for: singlePrompt(context: context))
+                let inputTokens = try await instructionTokens + promptTokens
+                return inputTokens + reservedOutputTokens <= contextTokens
             } catch {
                 // Model not ready, or measurement failed: fall back to chars.
             }
