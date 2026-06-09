@@ -21,7 +21,7 @@ The machine where you run `swift build`.
 | --- | --- | --- |
 | macOS | 26 (Tahoe) or later | `FoundationModels` SDK target is `macosx26.0` |
 | Chip | Apple silicon | Apple Intelligence is Apple-silicon only |
-| **Xcode** | Full Xcode (not just Command Line Tools) | The `@Generable` macro is expanded by the `FoundationModelsMacros` compiler plugin, which ships **only with full Xcode** |
+| **Xcode** | **26.4 or later**, full Xcode (not just Command Line Tools) | Full Xcode supplies the `FoundationModelsMacros` plugin that expands `@Generable`; the **26.4 SDK** is required on top of that because the build calls `SystemLanguageModel.contextSize` / `tokenCount(for:)`, which the 26.0–26.3 SDKs do not declare — an older Xcode fails to compile even though the call sits behind `#available` |
 | Swift | 6.0+ toolchain (bundled with Xcode) | Builds the package |
 
 > **Why Command Line Tools are not enough.** The on-device model, sessions, and
@@ -51,7 +51,7 @@ xcode-select -p
 # -> /Applications/Xcode.app/Contents/Developer
 
 xcodebuild -version
-# -> Xcode 26.x
+# -> Xcode 26.4 or newer (the 26.4 SDK declares contextSize / tokenCount)
 
 swift --version
 # -> Apple Swift version 6.x ... Target: arm64-apple-macosx26.0

@@ -26,12 +26,21 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Select Xcode 26
+      - name: Select Xcode 26.4+
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
           swift --version
+          # contextSize / tokenCount(for:) are declared only in the macOS 26.4
+          # SDK, so Xcode 26.0-26.3 fails to compile even behind #available.
+          # Fail loudly here instead of letting the build break cryptically.
+          sdk=$(xcrun --sdk macosx --show-sdk-version)
+          echo "macOS SDK: $sdk"
+          if [ "$(printf '%s\n26.4\n' "$sdk" | sort -V | head -1)" != "26.4" ]; then
+            echo "::error::macOS SDK $sdk is too old; 26.4+ is required (contextSize/tokenCount)."
+            exit 1
+          fi
 
       # Version is the build timestamp (UTC); no manual tagging.
       - name: Compute version
